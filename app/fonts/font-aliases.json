@@ -1,0 +1,15 @@
+{
+  "schema_version": "1.0.0",
+  "aliases": {
+    "Play": {
+      "family": "VK Sans Display",
+      "styles": {
+        "regular": "VK-Sans-Display/VKSansDisplay-Regular.ttf",
+        "medium": "VK-Sans-Display/VKSansDisplay-Medium.ttf",
+        "demibold": "VK-Sans-Display/VKSansDisplay-DemiBold.ttf",
+        "bold": "VK-Sans-Display/VKSansDisplay-Bold.ttf"
+      },
+      "reason": "Brand font alias used by the source PPTX"
+    }
+  }
+}
