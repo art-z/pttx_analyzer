@@ -1,0 +1,416 @@
+{
+  "46": {
+    "inferred_circular_charts": [
+      {
+        "source": "image_center_label",
+        "confidence": 0.96,
+        "chart_type_guess": "doughnut",
+        "plot_region_norm": {
+          "x": 0.011,
+          "y": 0.2586,
+          "width": 0.4345,
+          "height": 0.6456
+        },
+        "plot_region_pt": {
+          "x_pt": 10.59,
+          "y_pt": 139.63,
+          "width_pt": 417.15,
+          "height_pt": 348.62
+        },
+        "squareness": 0.673,
+        "center_text": {
+          "element_id": "slide46_slide_text_102",
+          "text": "22%пояснение"
+        },
+        "center_metric": {
+          "value": "22",
+          "unit": "%",
+          "value_typography": {
+            "family": "Play",
+            "size_pt": 88.0,
+            "bold": false,
+            "italic": false,
+            "underline": "none",
+            "color": "#0077FF"
+          },
+          "unit_typography": {
+            "family": "Play",
+            "size_pt": 60.0,
+            "bold": false,
+            "italic": false,
+            "underline": "none",
+            "color": "#0077FF"
+          },
+          "split_source": "runs"
+        },
+        "caption_text": null,
+        "signals": {
+          "has_center_metric": true,
+          "has_caption": false,
+          "metric_unit": "%",
+          "center_offset_ratio": 0.049,
+          "image_width_norm": 0.434,
+          "image_height_norm": 0.646
+        },
+        "consumed_element_ids": [
+          "slide46_slide_pic_101",
+          "slide46_slide_text_102"
+        ]
+      },
+      {
+        "source": "image_center_label",
+        "confidence": 0.903,
+        "chart_type_guess": "doughnut",
+        "plot_region_norm": {
+          "x": 0.5452,
+          "y": 0.087,
+          "width": 0.1816,
+          "height": 0.3228
+        },
+        "plot_region_pt": {
+          "x_pt": 523.42,
+          "y_pt": 46.99,
+          "width_pt": 174.31,
+          "height_pt": 174.31
+        },
+        "squareness": 0.563,
+        "center_text": {
+          "element_id": "slide46_slide_text_107",
+          "text": "42%"
+        },
+        "center_metric": {
+          "value": "42",
+          "unit": "%",
+          "value_typography": {
+            "family": "Play",
+            "size_pt": 44.0,
+            "bold": false,
+            "italic": false,
+            "underline": "none",
+            "color": "#0077FF"
+          },
+          "unit_typography": {
+            "family": "Play",
+            "size_pt": 28.0,
+            "bold": false,
+            "italic": false,
+            "underline": "none",
+            "color": "#0077FF"
+          },
+          "split_source": "runs"
+        },
+        "caption_text": {
+          "element_id": "slide46_slide_text_111",
+          "text": "пояснение",
+          "typography": {
+            "family": "Arial",
+            "size_pt": 18.0,
+            "bold": false,
+            "color": "#000000",
+            "alignment": "ctr",
+            "pptx_line_spacing_ratio": 1.1,
+            "line_height_ratio": 1.1,
+            "line_height_pt": 19.8,
+            "line_height_applicable": true
+          }
+        },
+        "signals": {
+          "has_center_metric": true,
+          "has_caption": true,
+          "metric_unit": "%",
+          "center_offset_ratio": 0.016,
+          "image_width_norm": 0.182,
+          "image_height_norm": 0.323
+        },
+        "consumed_element_ids": [
+          "slide46_slide_pic_103",
+          "slide46_slide_text_107",
+          "slide46_slide_text_111"
+        ]
+      },
+      {
+        "source": "image_center_label",
+        "confidence": 0.903,
+        "chart_type_guess": "doughnut",
+        "plot_region_norm": {
+          "x": 0.7433,
+          "y": 0.087,
+          "width": 0.1816,
+          "height": 0.3228
+        },
+        "plot_region_pt": {
+          "x_pt": 713.52,
+          "y_pt": 46.99,
+          "width_pt": 174.31,
+          "height_pt": 174.31
+        },
+        "squareness": 0.563,
+        "center_text": {
+          "element_id": "slide46_slide_text_108",
+          "text": "32%"
+        },
+        "center_metric": {
+          "value": "32",
+          "unit": "%",
+          "value_typography": {
+            "family": "Play",
+            "size_pt": 44.0,
+            "bold": false,
+            "italic": false,
+            "underline": "none",
+            "color": "#0077FF"
+          },
+          "unit_typography": {
+            "family": "Play",
+            "size_pt": 28.0,
+            "bold": false,
+            "italic": false,
+            "underline": "none",
+            "color": "#0077FF"
+          },
+          "split_source": "runs"
+        },
+        "caption_text": {
+          "element_id": "slide46_slide_text_112",
+          "text": "пояснение",
+          "typography": {
+            "family": "Arial",
+            "size_pt": 18.0,
+            "bold": false,
+            "color": "#000000",
+            "alignment": "ctr",
+            "pptx_line_spacing_ratio": 1.1,
+            "line_height_ratio": 1.1,
+            "line_height_pt": 19.8,
+            "line_height_applicable": true
+          }
+        },
+        "signals": {
+          "has_center_metric": true,
+          "has_caption": true,
+          "metric_unit": "%",
+          "center_offset_ratio": 0.016,
+          "image_width_norm": 0.182,
+          "image_height_norm": 0.323
+        },
+        "consumed_element_ids": [
+          "slide46_slide_pic_104",
+          "slide46_slide_text_108",
+          "slide46_slide_text_112"
+        ]
+      },
+      {
+        "source": "image_center_label",
+        "confidence": 0.903,
+        "chart_type_guess": "doughnut",
+        "plot_region_norm": {
+          "x": 0.5452,
+          "y": 0.5064,
+          "width": 0.1816,
+          "height": 0.3228
+        },
+        "plot_region_pt": {
+          "x_pt": 523.42,
+          "y_pt": 273.48,
+          "width_pt": 174.31,
+          "height_pt": 174.31
+        },
+        "squareness": 0.563,
+        "center_text": {
+          "element_id": "slide46_slide_text_109",
+          "text": "22%"
+        },
+        "center_metric": {
+          "value": "22",
+          "unit": "%",
+          "value_typography": {
+            "family": "Play",
+            "size_pt": 44.0,
+            "bold": false,
+            "italic": false,
+            "underline": "none",
+            "color": "#0077FF"
+          },
+          "unit_typography": {
+            "family": "Play",
+            "size_pt": 28.0,
+            "bold": false,
+            "italic": false,
+            "underline": "none",
+            "color": "#0077FF"
+          },
+          "split_source": "runs"
+        },
+        "caption_text": {
+          "element_id": "slide46_slide_text_113",
+          "text": "пояснение",
+          "typography": {
+            "family": "Arial",
+            "size_pt": 18.0,
+            "bold": false,
+            "color": "#000000",
+            "alignment": "ctr",
+            "pptx_line_spacing_ratio": 1.1,
+            "line_height_ratio": 1.1,
+            "line_height_pt": 19.8,
+            "line_height_applicable": true
+          }
+        },
+        "signals": {
+          "has_center_metric": true,
+          "has_caption": true,
+          "metric_unit": "%",
+          "center_offset_ratio": 0.015,
+          "image_width_norm": 0.182,
+          "image_height_norm": 0.323
+        },
+        "consumed_element_ids": [
+          "slide46_slide_pic_105",
+          "slide46_slide_text_109",
+          "slide46_slide_text_113"
+        ]
+      },
+      {
+        "source": "image_center_label",
+        "confidence": 0.903,
+        "chart_type_guess": "doughnut",
+        "plot_region_norm": {
+          "x": 0.7433,
+          "y": 0.5064,
+          "width": 0.1816,
+          "height": 0.3228
+        },
+        "plot_region_pt": {
+          "x_pt": 713.52,
+          "y_pt": 273.48,
+          "width_pt": 174.31,
+          "height_pt": 174.31
+        },
+        "squareness": 0.563,
+        "center_text": {
+          "element_id": "slide46_slide_text_110",
+          "text": "12%"
+        },
+        "center_metric": {
+          "value": "12",
+          "unit": "%",
+          "value_typography": {
+            "family": "Play",
+            "size_pt": 44.0,
+            "bold": false,
+            "italic": false,
+            "underline": "none",
+            "color": "#0077FF"
+          },
+          "unit_typography": {
+            "family": "Play",
+            "size_pt": 28.0,
+            "bold": false,
+            "italic": false,
+            "underline": "none",
+            "color": "#0077FF"
+          },
+          "split_source": "runs"
+        },
+        "caption_text": {
+          "element_id": "slide46_slide_text_114",
+          "text": "пояснение",
+          "typography": {
+            "family": "Arial",
+            "size_pt": 18.0,
+            "bold": false,
+            "color": "#000000",
+            "alignment": "ctr",
+            "pptx_line_spacing_ratio": 1.1,
+            "line_height_ratio": 1.1,
+            "line_height_pt": 19.8,
+            "line_height_applicable": true
+          }
+        },
+        "signals": {
+          "has_center_metric": true,
+          "has_caption": true,
+          "metric_unit": "%",
+          "center_offset_ratio": 0.015,
+          "image_width_norm": 0.182,
+          "image_height_norm": 0.323
+        },
+        "consumed_element_ids": [
+          "slide46_slide_pic_106",
+          "slide46_slide_text_110",
+          "slide46_slide_text_114"
+        ]
+      }
+    ]
+  },
+  "48": {
+    "inferred_chart": {
+      "source": "labeled_legend_image",
+      "confidence": 0.96,
+      "chart_type_guess": "line",
+      "plot_region_norm": {
+        "x": 0.0556,
+        "y": 0.2414,
+        "width": 0.8914,
+        "height": 0.6628
+      },
+      "x_axis": null,
+      "y_axis": null,
+      "legend": {
+        "kind": "labeled_pairs",
+        "labeled_pairs": [
+          {
+            "element_id": "slide48_slide_shape_102",
+            "label_element_id": "slide48_slide_text_103",
+            "text": "DAU",
+            "color": "#0077FF"
+          },
+          {
+            "element_id": "slide48_slide_shape_104",
+            "label_element_id": "slide48_slide_text_105",
+            "text": "MAU",
+            "color": "#FF3885"
+          }
+        ]
+      },
+      "series_palette": [
+        "#0077FF",
+        "#FF3885"
+      ],
+      "signals": {
+        "plot_mark_count": 0,
+        "x_axis_label_count": 0,
+        "y_axis_label_count": 0,
+        "legend_mark_count": 2,
+        "legend_pair_count": 2,
+        "plot_image_count": 1,
+        "plot_width_norm": 0.891,
+        "plot_height_norm": 0.663
+      },
+      "categories_preview": [],
+      "series_preview": [
+        {
+          "name": "DAU",
+          "values_preview": [],
+          "colors_preview": [
+            "#0077FF"
+          ]
+        },
+        {
+          "name": "MAU",
+          "values_preview": [],
+          "colors_preview": [
+            "#FF3885"
+          ]
+        }
+      ],
+      "consumed_element_ids": [
+        "slide48_slide_pic_101",
+        "slide48_slide_shape_102",
+        "slide48_slide_shape_104",
+        "slide48_slide_text_103",
+        "slide48_slide_text_105"
+      ]
+    }
+  }
+}

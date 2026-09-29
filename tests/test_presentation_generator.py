@@ -1,0 +1,533 @@
+from app.presentation_generator import (
+    generate_presentation_from_brief,
+    normalize_presentation_contract,
+    terminal_content_constraints,
+    validate_presentation_contract,
+)
+
+
+def test_first_model_request_receives_measured_cover_limits(monkeypatch):
+    from app.llm_client import LLMCompletion
+    from app.llm_usage import LLMUsageRecord
+
+    seen = []
+    plan = {
+        "title": {"max_chars": 32, "width_pt": 430, "height_pt": 90, "typography": {"size_pt": 36}},
+        "text": {"max_chars": 75, "width_pt": 430, "height_pt": 65, "typography": {"size_pt": 18}},
+        "person_supported": False,
+    }
+    report = {"slides": {"terminal_candidates": {
+        "initial": [{"slide_number": 7, "text_plan": plan}],
+        "final": [{"slide_number": 7, "text_plan": plan}],
+    }}}
+
+    def fake_complete(_system, user_prompt, **_kwargs):
+        seen.append(user_prompt)
+        return LLMCompletion(
+            '{"presentation":{"title":"Deck","slides":[{"intent":"title","title":"Flow","text":"Intro"}]}}',
+            LLMUsageRecord(1, 1, 2),
+        )
+
+    monkeypatch.setattr("app.presentation_generator.complete", fake_complete)
+    result = generate_presentation_from_brief("Бриф", report=report)
+    assert len(seen) == 1
+    assert '"title_max_chars": 32' in seen[0]
+    assert '"person_supported": false' in seen[0]
+    assert result["contract"]["valid"] is True
+    assert terminal_content_constraints(report)["initial"]["title_boxes_pt"][0]["font_size"] == 36
+
+
+def test_terminal_limits_fit_every_proposed_variant_and_do_not_require_person_without_common_slot():
+    def candidate(number, title_chars, text_chars, person):
+        return {"slide_number": number, "text_plan": {
+            "title": {"max_chars": title_chars, "width_pt": 400, "height_pt": 80, "typography": {"size_pt": 36}},
+            "text": {"max_chars": text_chars, "width_pt": 400, "height_pt": 70, "typography": {"size_pt": 18}},
+            "person_supported": person,
+        }}
+
+    report = {"slides": {"terminal_candidates": {"initial": [
+        candidate(1, 50, 90, True), candidate(2, 32, 70, False), candidate(3, 40, 80, True),
+    ], "final": []}}}
+    limits = terminal_content_constraints(report)
+    assert limits["initial"]["title_max_chars"] == 32
+    assert limits["initial"]["text_max_chars"] == 70
+    assert limits["initial"]["person_supported"] is False
+    assert limits["final"]["candidate_slide_numbers"] == [1, 2, 3]
+
+
+def test_generate_presentation_from_brief(monkeypatch):
+    from app.llm_client import LLMCompletion
+    from app.llm_usage import LLMUsageRecord
+
+    calls = []
+
+    def fake_complete(system_prompt, user_prompt, **kwargs):
+        calls.append((kwargs.get("operation"), kwargs.get("json_mode")))
+        return LLMCompletion(
+            text='{"presentation": {"title": "Flow", "slides": [{"index": 1, "intent": "title", "title": "Intro", "context": {"paragraphs": [{"body": "О продукте"}], "persons": [{"heading": "Анна", "body": "Автор"}], "lists": [{"heading": "1", "body": "План"}]}}]}}',
+            usage=LLMUsageRecord(input_tokens=1, output_tokens=2, total_tokens=3),
+        )
+
+    monkeypatch.setattr(
+        "app.presentation_generator.complete",
+        fake_complete,
+    )
+    result = generate_presentation_from_brief("Краткий бриф")
+
+    assert result["presentation"]["title"] == "Flow"
+    assert "raw_text" in result
+    assert result["contract"]["valid"] is True
+    assert "slide_analyses" not in result
+    assert calls == [("create_presentation", True)]
+
+
+def test_normalize_presentation_accepts_context_array_without_value_error():
+    presentation = normalize_presentation_contract({
+        "slides": [{
+            "title": {"short": "Flow", "middle": "Flow для команд", "long": "Flow для всей команды"},
+            "context": [
+                {"paragraphs": [{"body": "Первый факт"}]},
+                {"cards": [{"heading": "Карточка", "body": "Второй факт"}]},
+                {"charts": [{"type": "bar", "labels": ["A", "B"], "values": [1, 2]}]},
+            ],
+        }],
+    })
+
+    slide = presentation["slides"][0]
+    assert slide["title"] == "Flow для команд"
+    assert slide["title_options"]["short"] == "Flow"
+    assert slide["context"]["paragraphs"] == [{"heading": "", "body": "Первый факт"}]
+    assert slide["context"]["cards"] == [{"heading": "Карточка", "body": "Второй факт"}]
+    assert len(slide["context"]["charts"]) == 1
+
+
+def test_presentation_contract_normalizes_context_and_rejects_incomplete_chart():
+    presentation = normalize_presentation_contract({
+        "title": "Demo",
+        "slides": [{
+            "index": 1,
+            "intent": "timeline",
+            "title": "Динамика",
+            "context": {
+                "charts": [{"labels": ["Q1", "Q2"], "values": [10, "20"]}],
+            },
+        }],
+    })
+    context = presentation["slides"][0]["context"]
+    assert set(context) == {
+        "paragraphs", "metrics", "cards", "lists", "timelines", "icon_lists",
+        "tables", "charts", "diagrams", "persons", "quotes", "snippets", "images",
+    }
+    contract = validate_presentation_contract(presentation)
+    assert contract["valid"] is False
+    assert any(issue["code"] == "invalid_chart" for issue in contract["issues"])
+
+
+def test_presentation_contract_requires_narrative_and_dense_context_for_content_slides():
+    presentation = normalize_presentation_contract({
+        "title": "Demo",
+        "slides": [{
+            "intent": "process",
+            "title": "Процесс",
+            "context": {
+                "diagrams": [{
+                    "nodes": [{"id": "a", "label": "A"}, {"id": "b", "label": "B"}],
+                    "links": [{"from": "a", "to": "b"}],
+                }],
+            },
+        }],
+    })
+    contract = validate_presentation_contract(presentation)
+    assert any(issue["code"] == "missing_narrative_context" for issue in contract["issues"])
+    assert any(issue["code"] == "insufficient_context_density" for issue in contract["issues"])
+
+    presentation["slides"][0]["context"]["paragraphs"] = [
+        {"text": "Каждый этап получает структурированные данные предыдущего этапа."},
+    ]
+    sparse_issue = next(
+        issue for issue in validate_presentation_contract(presentation)["issues"]
+        if issue["code"] == "insufficient_context_density"
+    )
+    assert sparse_issue["minimum_types"] == 3
+    assert sparse_issue["actual_types"] == 2
+
+    presentation["slides"][0]["context"]["lists"] = [
+        {"heading": "1", "body": "Проверить входные данные"},
+    ]
+    assert validate_presentation_contract(presentation)["valid"] is True
+
+
+def test_presentation_contract_requires_three_context_types_for_section():
+    presentation = normalize_presentation_contract({
+        "title": "Demo",
+        "slides": [{
+            "intent": "section",
+            "title": "Внедрение",
+            "context": {
+                "paragraphs": [{"body": "Раздел об этапах внедрения."}],
+                "lists": [{"heading": "1", "body": "Подготовка"}],
+            },
+        }],
+    })
+    assert any(
+        issue["code"] == "insufficient_context_density"
+        for issue in validate_presentation_contract(presentation)["issues"]
+    )
+    presentation["slides"][0]["context"]["icon_lists"] = [
+        {"body": "На выходе — согласованный план запуска"},
+    ]
+    assert validate_presentation_contract(presentation)["valid"] is True
+
+
+def test_generate_presentation_keeps_first_response_for_sparse_context(monkeypatch):
+    from app.llm_client import LLMCompletion
+    from app.llm_usage import LLMUsageRecord
+
+    prompts = []
+    responses = [
+        '{"presentation":{"title":"Flow","slides":[{"intent":"process","title":{"short":"Путь","middle":"Путь Flow","long":"Путь Flow от загрузки до выдачи"},"context":{"diagrams":[{"nodes":[{"id":"a","label":"Загрузка"},{"id":"b","label":"Выдача"}],"links":[{"from":"a","to":"b"}]}]}}]}}',
+    ]
+
+    def fake_complete(system_prompt, user_prompt, **kwargs):
+        assert '"title": {"short": "Короткий заголовок", "middle": "Обычный заголовок", "long": "Развёрнутый заголовок"}' in system_prompt
+        prompts.append(user_prompt)
+        return LLMCompletion(
+            text=responses.pop(0),
+            usage=LLMUsageRecord(input_tokens=1, output_tokens=2, total_tokens=3),
+        )
+
+    monkeypatch.setattr("app.presentation_generator.complete", fake_complete)
+    result = generate_presentation_from_brief("Бриф")
+
+    assert len(prompts) == 1
+    assert result["contract"]["valid"] is False
+    assert result["presentation"]["slides"][0]["title"] == "Путь Flow"
+    assert result["presentation"]["slides"][0]["title_options"] == {
+        "short": "Путь", "middle": "Путь Flow", "long": "Путь Flow от загрузки до выдачи",
+    }
+    assert result["presentation"]["slides"][0]["context"]["diagrams"] == [
+        {"nodes": [{"id": "a", "label": "Загрузка"}, {"id": "b", "label": "Выдача"}],
+         "links": [{"from": "a", "to": "b"}]},
+    ]
+
+
+def test_presentation_contract_rejects_multiple_charts_on_one_slide():
+    chart = {"type": "bar", "labels": ["До", "После"], "values": [12, 4]}
+    presentation = normalize_presentation_contract({
+        "title": "Demo",
+        "slides": [{
+            "intent": "metrics",
+            "title": "Сравнение",
+            "context": {
+                "paragraphs": [{"body": "Время подготовки сократилось."}],
+                "cards": [{"heading": "Результат", "body": "Четыре часа вместо двенадцати."}],
+                "charts": [chart, chart],
+            },
+        }],
+    })
+
+    issue = next(
+        issue for issue in validate_presentation_contract(presentation)["issues"]
+        if issue["code"] == "too_many_graphics_for_slide"
+    )
+    assert issue["field"] == "charts"
+    assert issue["actual"] == 2
+    assert issue["maximum"] == 1
+
+
+def test_presentation_contract_normalizes_text_items_to_heading_body():
+    presentation = normalize_presentation_contract({
+        "title": "Demo",
+        "slides": [{
+            "intent": "team",
+            "title": "Команда",
+            "context": {
+                "paragraphs": [{"text": "Команда отвечает за запуск."}],
+                "persons": [{
+                    "name": "Анна",
+                    "bio": "Руководитель",
+                    "text": "Отвечает за внедрение",
+                }],
+                "lists": [{"title": "Опыт", "text": "10 лет"}],
+                "quotes": [{"body": "Мы запустили проект за неделю."}],
+            },
+        }],
+    })
+    context = presentation["slides"][0]["context"]
+
+    assert context["paragraphs"] == [{
+        "heading": "",
+        "body": "Команда отвечает за запуск.",
+    }]
+    assert context["lists"] == []
+    assert context["cards"] == [{"heading": "Опыт", "body": "10 лет"}]
+    assert context["persons"] == [{
+        "heading": "Анна",
+        "body": "Руководитель — Отвечает за внедрение",
+    }]
+    assert context["quotes"] == [{
+        "heading": "",
+        "body": "Мы запустили проект за неделю.",
+    }]
+
+
+def test_quote_needs_its_words_but_not_an_author_heading():
+    presentation = normalize_presentation_contract({
+        "slides": [{
+            "intent": "quote",
+            "title": "Отзывы",
+            "context": {
+                "paragraphs": [{"body": "Отзывы клиентов о запуске."}],
+                "quotes": [{"body": "Мы сократили подготовку презентации в три раза."}],
+                "persons": [{"heading": "Игорь Петров", "body": "Автор отзыва"}],
+            },
+        }],
+    })
+    context = presentation["slides"][0]["context"]
+    assert context["quotes"] == [{"heading": "", "body": "Мы сократили подготовку презентации в три раза."}]
+    assert not any(issue["code"] == "invalid_quote" for issue in validate_presentation_contract(presentation)["issues"])
+
+    context["quotes"] = [{"heading": "Отзывы", "body": ""}]
+    assert any(issue["code"] == "invalid_quote" for issue in validate_presentation_contract(presentation)["issues"])
+
+
+def test_presentation_contract_splits_legacy_lists_by_repeat_type():
+    presentation = normalize_presentation_contract({
+        "title": "Demo",
+        "slides": [{
+            "intent": "features",
+            "title": "Компоненты",
+            "context": {
+                "lists": [
+                    {"heading": "Карточка", "body": "Текст"},
+                    {"heading": "1", "body": "Шаг"},
+                    {"heading": "2026", "body": "Событие"},
+                    {"heading": "", "body": "Под иконкой"},
+                ],
+            },
+        }],
+    })
+    context = presentation["slides"][0]["context"]
+
+    assert [item["heading"] for item in context["cards"]] == ["Карточка"]
+    assert [item["heading"] for item in context["lists"]] == ["1"]
+    assert [item["heading"] for item in context["timelines"]] == ["2026"]
+    assert [item["body"] for item in context["icon_lists"]] == ["Под иконкой"]
+
+
+def test_presentation_contract_requires_numeric_metric_value():
+    presentation = normalize_presentation_contract({
+        "title": "Demo",
+        "slides": [{
+            "intent": "metrics",
+            "title": "Результаты",
+            "context": {
+                "paragraphs": [{"heading": "", "body": "Измеримые результаты."}],
+                "metrics": [
+                    {"value": "40", "unit": "%", "description": "рост"},
+                    {"value": "много", "unit": "%", "description": "невалидно"},
+                    {"value": "12", "unit": "очень длинная единица", "description": "невалидно"},
+                ],
+            },
+        }],
+    })
+
+    issues = validate_presentation_contract(presentation)["issues"]
+    metric_issues = [item for item in issues if item["code"] == "invalid_metric"]
+    assert len(metric_issues) == 2
+    assert metric_issues[0]["missing_or_invalid"] == ["value"]
+    assert metric_issues[1]["missing_or_invalid"] == ["unit"]
+
+
+def test_presentation_contract_numbers_duplicate_list_headings():
+    presentation = normalize_presentation_contract({
+        "title": "Demo",
+        "slides": [{
+            "intent": "features",
+            "title": "Преимущества",
+            "context": {
+                "lists": [
+                    {"heading": "Преимущества", "body": "Быстрая подготовка"},
+                    {"heading": "Преимущества", "body": "Сохранение стиля"},
+                    {"heading": "Преимущества", "body": "Меньше правок"},
+                ],
+            },
+        }],
+    })
+
+    assert [
+        item["heading"]
+        for item in presentation["slides"][0]["context"]["lists"]
+    ] == ["1", "2", "3"]
+
+
+def test_presentation_contract_requires_three_bar_categories():
+    presentation = normalize_presentation_contract({
+        "title": "Demo",
+        "slides": [{
+            "intent": "timeline",
+            "title": "До и после",
+            "context": {
+                "paragraphs": [{"body": "Сравнение времени."}],
+                "charts": [{
+                    "type": "bar",
+                    "labels": ["До", "После"],
+                    "values": [12, 4],
+                }],
+            },
+        }],
+    })
+
+    assert any(
+        issue["code"] == "invalid_chart"
+        for issue in validate_presentation_contract(presentation)["issues"]
+    )
+
+
+def test_presentation_contract_checks_visual_sizes_and_available_families():
+    presentation = normalize_presentation_contract({
+        "title": "Demo", "slides": [
+            {"intent": "title", "title": "Титул"},
+            {"intent": "content", "title": "Таблица", "context": {
+                "tables": [{"headers": ["A", "B"], "rows": [[1, 2]]}],
+            }},
+            {"intent": "content", "title": "Линия", "context": {
+                "charts": [{"type": "line", "labels": list("ABCDEF"), "values": [1, 2, 3, 4, 5, 6]}],
+            }},
+            {"intent": "content", "title": "Выводы"},
+            {"intent": "cta", "title": "Финал"},
+        ],
+    })
+    report = {"graphic_components": {
+        "tables": [{"component_id": "tbl"}],
+        "charts": [
+            {"chart_type": "bar", "is_baseline": True},
+            {"chart_type": "line", "is_baseline": True},
+        ],
+    }}
+    codes = {issue["code"] for issue in validate_presentation_contract(presentation, report)["issues"]}
+    assert {"invalid_table", "invalid_chart", "missing_visual_family"} <= codes
+
+
+def test_contract_limits_headings_values_and_units_but_not_descriptions():
+    presentation = normalize_presentation_contract({"title": "Demo", "slides": [{
+        "intent": "metrics", "title": "З" * 73, "text": "Описание " * 100,
+        "context": {"metrics": [{
+            "value": "123456789", "unit": "миллионов", "description": "Пояснение " * 100,
+        }]},
+    }]})
+    issues = validate_presentation_contract(presentation)["issues"]
+    assert any(issue["code"] == "title_too_long" for issue in issues)
+    metric = next(issue for issue in issues if issue["code"] == "invalid_metric")
+    assert set(metric["missing_or_invalid"]) == {"value", "unit"}
+    assert all(issue["code"] != "invalid_description" for issue in issues)
+
+
+def test_presentation_contract_requires_metrics_tables_and_bar_charts_for_full_deck():
+    presentation = normalize_presentation_contract({
+        "title": "Demo",
+        "slides": [
+            {"intent": "title", "title": f"Слайд {index}"}
+            for index in range(1, 7)
+        ],
+    })
+
+    codes = {
+        issue["code"]
+        for issue in validate_presentation_contract(presentation)["issues"]
+    }
+    assert "insufficient_metric_slide_coverage" in codes
+    assert "insufficient_table_slide_coverage" in codes
+    assert "insufficient_bar_chart_slide_coverage" in codes
+
+
+BASELINE_CHART_REPORT = {"graphic_components": {"charts": [
+    {"chart_type": chart_type, "is_baseline": True}
+    for chart_type in ("line", "area", "bar", "pie", "doughnut")
+]}}
+
+
+def _share_chart(chart_type="doughnut", values=(40, 25, 20, 15)):
+    return {
+        "title": "Структура бюджета проекта",
+        "text": "Доли статей расходов, % (пример)",
+        "type": chart_type,
+        "unit": "%",
+        "labels": ["Разработка", "Маркетинг", "Поддержка", "Инфраструктура"][:len(values)],
+        "values": list(values),
+    }
+
+
+def _chart_issues(chart):
+    presentation = normalize_presentation_contract({"title": "Demo", "slides": [{
+        "intent": "comparison", "title": "Структура", "context": {
+            "paragraphs": [{"body": "Основная часть бюджета уходит на разработку."}],
+            "charts": [chart],
+        },
+    }]})
+    return [
+        issue for issue in validate_presentation_contract(presentation)["issues"]
+        if issue["code"] == "invalid_chart"
+    ]
+
+
+def test_contract_accepts_pie_and_doughnut_shares_summing_to_100():
+    assert _chart_issues(_share_chart("doughnut")) == []
+    assert _chart_issues(_share_chart("pie", (50, 30, 20))) == []
+    assert _chart_issues(_share_chart("pie", (33.3, 33.3, 33.4))) == []
+
+
+def test_contract_rejects_shares_that_do_not_add_up_to_100():
+    issues = _chart_issues(_share_chart("pie", (40, 25, 20, 10)))
+    assert issues and issues[0]["reason"] == "shares_must_be_positive_and_sum_to_100"
+    assert issues[0]["actual_sum"] == 95
+    assert _chart_issues(_share_chart("doughnut", (60, 50, -10)))
+    # Absolute values stay valid for bar charts.
+    assert _chart_issues({"type": "bar", "labels": ["A", "B", "C"], "values": [120, 80, 45]}) == []
+
+
+def test_baseline_circular_charts_are_an_available_family():
+    presentation = normalize_presentation_contract({"title": "Demo", "slides": [
+        {"intent": "title", "title": "Титул"},
+        {"intent": "timeline", "title": "Рост", "context": {"charts": [
+            {"type": "line", "labels": ["Q1", "Q2", "Q3", "Q4"], "values": [12, 28, 45, 63]},
+        ]}},
+        {"intent": "comparison", "title": "Команды", "context": {"charts": [
+            {"type": "bar", "labels": ["A", "B", "C"], "values": [14, 9, 6]},
+        ]}},
+        {"intent": "content", "title": "Выводы"},
+        {"intent": "cta", "title": "Финал"},
+    ]})
+    issues = validate_presentation_contract(presentation, BASELINE_CHART_REPORT)["issues"]
+    assert {"code": "missing_visual_family", "field": "circular", "minimum": 1, "actual": 0} in issues
+
+    presentation["slides"][3]["context"]["charts"] = [_share_chart("pie")]
+    issues = validate_presentation_contract(presentation, BASELINE_CHART_REPORT)["issues"]
+    assert not any(issue.get("field") == "circular" for issue in issues)
+
+
+def test_user_prompt_describes_chart_families_and_allows_illustrative_data(monkeypatch):
+    from app.llm_client import LLMCompletion
+    from app.llm_usage import LLMUsageRecord
+
+    seen = []
+
+    def fake_complete(_system, user_prompt, **_kwargs):
+        seen.append(user_prompt)
+        return LLMCompletion('{"presentation":{"title":"Deck","slides":[]}}', LLMUsageRecord(1, 1, 2))
+
+    monkeypatch.setattr("app.presentation_generator.complete", fake_complete)
+    generate_presentation_from_brief("Бриф", report=BASELINE_CHART_REPORT)
+    assert "bar, circular, line" in seen[0]
+    assert "charts.type = \"pie\" или \"doughnut\"" in seen[0]
+    assert "суммой ровно 100" in seen[0]
+    assert "иллюстративные" in seen[0]
+
+
+def test_prompt_documents_share_charts():
+    from app.prompts_loader import load_prompt
+
+    prompt = load_prompt("create_presentation.md")
+    assert "doughnut" in prompt
+    assert "сумма `values` равна ровно 100" in prompt
+    assert "## Разнообразие данных в графиках" in prompt
