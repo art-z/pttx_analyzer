@@ -1,0 +1,32 @@
+services:
+  analyzer:
+    build:
+      context: .
+      target: development
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      OUTPUT_ROOT: /output
+    volumes:
+      - ./app:/app/app
+      - ./prompts:/app/prompts
+      - ./output:/output
+
+  frontend:
+    image: node:22-alpine
+    working_dir: /frontend
+    command: sh -c "npm ci && npm run dev"
+    environment:
+      VITE_API_PROXY_TARGET: http://analyzer:8000
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/frontend
+      - frontend_node_modules:/frontend/node_modules
+    depends_on:
+      - analyzer
+
+volumes:
+  frontend_node_modules:
