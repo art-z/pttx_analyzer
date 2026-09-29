@@ -1,0 +1,631 @@
+"""Detect slide pagination indicators — not just rows of circles."""
+
+import re
+from collections import Counter, defaultdict
+from statistics import median, pstdev
+
+from .pptx import PPTXPackage
+from .slide_geometry import is_shape_visible, shape_geometry
+from .spatial_analysis import _extract_image_instances
+
+NS = {
+    "a": "http://schemas.openxmlformats.org/drawingml/2006/main",
+    "p": "http://schemas.openxmlformats.org/presentationml/2006/main",
+}
+
+BOTTOM_ZONE_MIN = 0.72
+MAX_DOT_SIZE_RATIO = 0.06
+MIN_DOT_SIZE_PT = 4
+MAX_DOT_ASPECT = 1.45
+MIN_DOTS = 3
+MAX_DOTS = 20
+SPACING_TOLERANCE = 0.35
+MIN_PAGINATION_SLIDES = 2
+DOT_PRESETS = {"ellipse", "circle", "roundRect", "rect"}
+
+TEXT_PATTERNS = [
+    re.compile(r"^\s*(\d{1,3})\s*[/\\|]\s*(\d{1,3})\s*$"),
+    re.compile(r"^\s*(\d{1,3})\s+of\s+(\d{1,3})\s*$", re.I),
+    re.compile(r"^\s*(\d{1,3})\s*[-–—]\s*(\d{1,3})\s*$"),
+    re.compile(r"^\s*(\d{1,3})\s*/\s*(\d{1,3})\s*$"),
+]
+
+
+def detect_pagination(
+    package: PPTXPackage,
+    text_blocks: list[dict],
+    assets: dict | None,
+    slide_size: tuple[float, float] | None,
+    theme: dict | None = None,
+) -> dict:
+    slide_width, slide_height = slide_size or (None, None)
+    if not slide_width or not slide_height:
+        return _empty_result()
+
+    theme_map = _theme_color_map(theme)
+    shape_markers = _extract_shape_markers(package, slide_width, slide_height, theme_map)
+    image_markers = _extract_image_markers(assets, slide_width, slide_height)
+    text_markers = _extract_text_markers(text_blocks, slide_width, slide_height)
+
+    slide_markers = defaultdict(list)
+    for marker in shape_markers + image_markers + text_markers:
+        slide_markers[marker["slide_number"]].append(marker)
+
+    dot_candidates = []
+    for slide_number in sorted(slide_markers):
+        dot_candidates.extend(_find_dot_rows(slide_number, slide_markers[slide_number], slide_width, slide_height))
+
+    numeric_candidates = _find_numeric_pagination(text_markers, slide_height)
+    progress_candidates = _find_progress_bars(shape_markers, slide_width, slide_height)
+
+    patterns = _aggregate_pagination_patterns(dot_candidates, slide_width, slide_height)
+    patterns.extend(numeric_candidates)
+    patterns.extend(progress_candidates)
+
+    confirmed = [pattern for pattern in patterns if pattern.get("confidence", 0) >= 0.55]
+    confirmed.sort(key=lambda item: (-item["confidence"], -item["slide_count"], item["pattern_id"]))
+
+    return {
+        "summary": {
+            "pattern_count": len(confirmed),
+            "slide_count": len({slide for pattern in confirmed for slide in pattern.get("slide_numbers", [])}),
+            "types": dict(Counter(pattern["type"] for pattern in confirmed)),
+        },
+        "patterns": confirmed,
+        "candidates": {
+            "dot_rows": len(dot_candidates),
+            "numeric": len(numeric_candidates),
+            "progress": len(progress_candidates),
+        },
+    }
+
+
+def _empty_result() -> dict:
+    return {
+        "summary": {"pattern_count": 0, "slide_count": 0, "types": {}},
+        "patterns": [],
+        "candidates": {"dot_rows": 0, "numeric": 0, "progress": 0},
+    }
+
+
+def _theme_color_map(theme: dict | None) -> dict[str, str]:
+    result = {}
+    for entry in (theme or {}).get("themes", []):
+        for name, color in (entry.get("colors") or {}).items():
+            if isinstance(color, str) and color.startswith("#"):
+                result[name] = color.upper()
+    return result
+
+
+def _extract_shape_markers(
+    package: PPTXPackage,
+    slide_width: float,
+    slide_height: float,
+    theme_map: dict[str, str],
+) -> list[dict]:
+    markers = []
+    for part in package.list("ppt/slides/"):
+        if not part.endswith(".xml"):
+            continue
+        slide_match = re.search(r"slide(\d+)\.xml$", part)
+        if slide_match is None:
+            continue
+        slide_number = int(slide_match.group(1))
+        root = package.xml(part)
+        for shape in root.findall(".//p:sp", NS):
+            if not is_shape_visible(shape):
+                continue
+            geometry = shape_geometry(shape)
+            if geometry is None:
+                continue
+            preset = _shape_preset(shape)
+            fill = _fill_signature(shape, theme_map)
+            stroke = _stroke_signature(shape, theme_map)
+            width = geometry["width_pt"]
+            height = geometry["height_pt"]
+            if width <= 0 or height <= 0:
+                continue
+            identity = shape.find("p:nvSpPr/p:cNvPr", NS)
+            markers.append({
+                "slide_number": slide_number,
+                "shape_id": identity.get("id") if identity is not None else None,
+                "source": "shape",
+                "preset": preset,
+                "x_pt": geometry["x_pt"],
+                "y_pt": geometry["y_pt"],
+                "width_pt": width,
+                "height_pt": height,
+                "center_x_pt": geometry["x_pt"] + width / 2,
+                "center_y_pt": geometry["y_pt"] + height / 2,
+                "fill": fill,
+                "stroke": stroke,
+                "is_line_like": _is_line_like(width, height, preset),
+                "is_dot_like": _is_dot_like(width, height, preset, slide_width, slide_height),
+            })
+    return markers
+
+
+def _shape_preset(shape) -> str | None:
+    preset = shape.find("p:spPr/a:prstGeom", NS)
+    return preset.get("prst") if preset is not None else None
+
+
+def _fill_signature(shape, theme_map: dict[str, str]) -> str:
+    sp_pr = shape.find("p:spPr", NS)
+    if sp_pr is None:
+        return "none"
+    for tag in ("a:solidFill", "a:gradFill", "a:noFill"):
+        node = sp_pr.find(tag, NS)
+        if node is None:
+            continue
+        if tag.endswith("noFill"):
+            return "none"
+        color = _color_from_fill(node, theme_map)
+        return color or tag.split("}", 1)[-1]
+    return "unknown"
+
+
+def _stroke_signature(shape, theme_map: dict[str, str]) -> str:
+    sp_pr = shape.find("p:spPr", NS)
+    if sp_pr is None:
+        return "none"
+    line = sp_pr.find("a:ln", NS)
+    if line is None:
+        return "none"
+    if line.find("a:noFill", NS) is not None:
+        return "none"
+    solid = line.find("a:solidFill", NS)
+    if solid is None:
+        return "line"
+    return _color_from_fill(solid, theme_map) or "line"
+
+
+def _color_from_fill(fill_node, theme_map: dict[str, str]) -> str | None:
+    for child in fill_node:
+        tag = child.tag.rsplit("}", 1)[-1]
+        if tag == "srgbClr":
+            value = child.get("val")
+            return f"#{value.upper()}" if value else None
+        if tag == "schemeClr":
+            name = child.get("val")
+            return theme_map.get(name, f"scheme:{name}")
+        if tag == "prstClr":
+            return f"prst:{child.get('val')}"
+    return None
+
+
+def _is_dot_like(width: float, height: float, preset: str | None, slide_width: float, slide_height: float) -> bool:
+    if max(width, height) > slide_width * MAX_DOT_SIZE_RATIO:
+        return False
+    if min(width, height) < MIN_DOT_SIZE_PT:
+        return False
+    aspect = max(width, height) / max(min(width, height), 0.1)
+    if aspect > MAX_DOT_ASPECT:
+        return False
+    if preset in DOT_PRESETS or preset is None:
+        return True
+    return max(width, height) <= slide_width * 0.04
+
+
+def _is_line_like(width: float, height: float, preset: str | None) -> bool:
+    aspect = max(width, height) / max(min(width, height), 0.1)
+    if preset == "line":
+        return True
+    return aspect >= 6 and min(width, height) <= 8
+
+
+def _extract_image_markers(assets: dict | None, slide_width: float, slide_height: float) -> list[dict]:
+    markers = []
+    for image in _extract_image_instances(assets, slide_width, slide_height):
+        width_norm = image.get("width_norm") or image["width_pt"] / slide_width
+        height_norm = image.get("height_norm") or image["height_pt"] / slide_height
+        if max(width_norm, height_norm) > MAX_DOT_SIZE_RATIO:
+            continue
+        markers.append({
+            "slide_number": image["slide_number"],
+            "shape_id": image.get("shape_id"),
+            "source": "image",
+            "preset": "image",
+            "x_pt": image["x_pt"],
+            "y_pt": image["y_pt"],
+            "width_pt": image["width_pt"],
+            "height_pt": image["height_pt"],
+            "center_x_pt": image["center_x_pt"],
+            "center_y_pt": image["center_y_pt"],
+            "fill": image.get("filename"),
+            "stroke": "none",
+            "is_line_like": False,
+            "is_dot_like": True,
+        })
+    return markers
+
+
+def _extract_text_markers(text_blocks: list[dict], slide_width: float, slide_height: float) -> list[dict]:
+    markers = []
+    for block in text_blocks:
+        center_y = block["y_pt"] + block["height_pt"] / 2
+        markers.append({
+            "slide_number": block["slide_number"],
+            "shape_id": block.get("shape_id"),
+            "source": "text",
+            "preset": "text",
+            "x_pt": block["x_pt"],
+            "y_pt": block["y_pt"],
+            "width_pt": block["width_pt"],
+            "height_pt": block["height_pt"],
+            "center_x_pt": block["x_pt"] + block["width_pt"] / 2,
+            "center_y_pt": center_y,
+            "fill": None,
+            "stroke": None,
+            "text_sample": block.get("text_sample") or "",
+            "size_pt": block.get("size_pt"),
+            "is_line_like": False,
+            "is_dot_like": False,
+            "y_norm": center_y / slide_height,
+        })
+    return markers
+
+
+def _find_dot_rows(slide_number: int, markers: list[dict], slide_width: float, slide_height: float) -> list[dict]:
+    dots = [
+        marker for marker in markers
+        if marker.get("is_dot_like") and marker["center_y_pt"] / slide_height >= BOTTOM_ZONE_MIN
+    ]
+    if len(dots) < MIN_DOTS:
+        return []
+
+    align_tol = slide_height * 0.025
+    by_row = defaultdict(list)
+    for dot in sorted(dots, key=lambda item: item["center_y_pt"]):
+        row_key = round(dot["center_y_pt"] / align_tol)
+        by_row[row_key].append(dot)
+
+    rows = []
+    for row_dots in by_row.values():
+        if len(row_dots) < MIN_DOTS or len(row_dots) > MAX_DOTS:
+            continue
+        ordered = sorted(row_dots, key=lambda item: item["center_x_pt"])
+        spacing = _spacing_uniformity(ordered)
+        if spacing is None:
+            continue
+        active = _detect_active_dot(ordered)
+        rows.append({
+            "slide_number": slide_number,
+            "type": "dot_row",
+            "dot_count": len(ordered),
+            "dots": [_serialize_dot(dot) for dot in ordered],
+            "spacing_pt": spacing["median_gap"],
+            "spacing_uniformity": spacing["score"],
+            "y_norm": round(median(dot["center_y_pt"] for dot in ordered) / slide_height, 3),
+            "x_norm": round(ordered[0]["center_x_pt"] / slide_width, 3),
+            "active_index": active["index"],
+            "active_reason": active["reason"],
+            "active_confidence": active["confidence"],
+            "style_groups": active["style_groups"],
+        })
+    return rows
+
+
+def _spacing_uniformity(ordered: list[dict]) -> dict | None:
+    if len(ordered) < 2:
+        return None
+    gaps = []
+    for index in range(len(ordered) - 1):
+        left = ordered[index]
+        right = ordered[index + 1]
+        gap = right["x_pt"] - (left["x_pt"] + left["width_pt"])
+        gaps.append(gap)
+    if not gaps or min(gaps) < -2:
+        return None
+    med = median(gaps)
+    if med <= 0:
+        return None
+    spread = pstdev(gaps) if len(gaps) > 1 else 0.0
+    score = max(0.0, 1.0 - spread / max(med, 1.0))
+    if score < 0.55:
+        return None
+    return {"median_gap": round(med, 2), "score": round(score, 3)}
+
+
+def _detect_active_dot(dots: list[dict]) -> dict:
+    style_keys = []
+    sizes = []
+    for dot in dots:
+        style_keys.append(f"{dot.get('fill')}|{dot.get('stroke')}|{dot.get('preset')}")
+        sizes.append(max(dot["width_pt"], dot["height_pt"]))
+
+    style_counts = Counter(style_keys)
+    size_med = median(sizes)
+    active_index = None
+    reason = None
+    confidence = 0.0
+
+    if len(style_counts) >= 2:
+        dominant_style, dominant_count = style_counts.most_common(1)[0]
+        for index, dot in enumerate(dots):
+            key = f"{dot.get('fill')}|{dot.get('stroke')}|{dot.get('preset')}"
+            if key != dominant_style:
+                active_index = index
+                reason = "distinct_fill_or_stroke"
+                confidence = min(1.0, 0.55 + 0.1 * (len(dots) - dominant_count))
+                break
+
+    if active_index is None and size_med > 0:
+        for index, size in enumerate(sizes):
+            if size >= size_med * 1.12:
+                if active_index is None or size > sizes[active_index]:
+                    active_index = index
+                    reason = "larger_size"
+                    confidence = max(confidence, 0.6)
+
+    if active_index is None:
+        for index, dot in enumerate(dots):
+            if dot.get("fill") == "none" and dot.get("stroke") not in {None, "none"}:
+                active_index = index
+                reason = "outline_vs_filled"
+                confidence = 0.58
+                break
+
+    return {
+        "index": active_index,
+        "reason": reason,
+        "confidence": round(confidence, 3),
+        "style_groups": len(style_counts),
+    }
+
+
+def _serialize_dot(dot: dict) -> dict:
+    return {
+        "shape_id": dot.get("shape_id"),
+        "source": dot.get("source"),
+        "x_pt": round(dot["x_pt"], 2),
+        "y_pt": round(dot["y_pt"], 2),
+        "width_pt": round(dot["width_pt"], 2),
+        "height_pt": round(dot["height_pt"], 2),
+        "fill": dot.get("fill"),
+        "stroke": dot.get("stroke"),
+        "preset": dot.get("preset"),
+    }
+
+
+def _find_numeric_pagination(text_markers: list[dict], slide_height: float) -> list[dict]:
+    patterns = []
+    for marker in text_markers:
+        y_norm = marker.get("y_norm", marker["center_y_pt"] / slide_height)
+        if y_norm < BOTTOM_ZONE_MIN:
+            continue
+        text = (marker.get("text_sample") or "").strip()
+        if not text or len(text) > 24:
+            continue
+        for pattern in TEXT_PATTERNS:
+            match = pattern.match(text)
+            if match is None:
+                continue
+            current = int(match.group(1))
+            total = int(match.group(2))
+            if total < current or total > MAX_DOTS * 3 or current < 1:
+                continue
+            patterns.append({
+                "pattern_id": f"pg_num_{len(patterns) + 1:03d}",
+                "type": "numeric",
+                "confidence": 0.92,
+                "slide_count": 1,
+                "slide_numbers": [marker["slide_number"]],
+                "total_pages": total,
+                "instances": [{
+                    "slide_number": marker["slide_number"],
+                    "current_page": current,
+                    "total_pages": total,
+                    "text": text,
+                    "y_norm": round(y_norm, 3),
+                }],
+                "detection": {
+                    "methods": ["numeric_text", "bottom_zone"],
+                    "format": pattern.pattern,
+                },
+            })
+            break
+    return _merge_numeric_patterns(patterns)
+
+
+def _merge_numeric_patterns(patterns: list[dict]) -> list[dict]:
+    by_total = defaultdict(list)
+    for pattern in patterns:
+        by_total[pattern["total_pages"]].append(pattern)
+
+    merged = []
+    for total, items in by_total.items():
+        if len(items) == 1:
+            merged.append(items[0])
+            continue
+        instances = []
+        slide_numbers = []
+        for item in items:
+            instances.extend(item["instances"])
+            slide_numbers.extend(item["slide_numbers"])
+        currents = sorted({inst["current_page"] for inst in instances})
+        progression = _score_page_progression(slide_numbers, instances)
+        merged.append({
+            "pattern_id": f"pg_num_{len(merged) + 1:03d}",
+            "type": "numeric",
+            "confidence": round(min(0.98, 0.75 + 0.08 * len(slide_numbers) + progression * 0.15), 3),
+            "slide_count": len(set(slide_numbers)),
+            "slide_numbers": sorted(set(slide_numbers)),
+            "total_pages": total,
+            "current_pages_seen": currents,
+            "page_progression_score": round(progression, 3),
+            "instances": instances,
+            "detection": {
+                "methods": ["numeric_text", "bottom_zone", "cross_slide"],
+            },
+        })
+    return merged
+
+
+def _find_progress_bars(markers: list[dict], slide_width: float, slide_height: float) -> list[dict]:
+    lines = [
+        marker for marker in markers
+        if marker.get("is_line_like")
+        and marker["center_y_pt"] / slide_height >= BOTTOM_ZONE_MIN
+        and marker["width_pt"] > slide_width * 0.15
+    ]
+    patterns = []
+    by_slide = defaultdict(list)
+    for line in lines:
+        by_slide[line["slide_number"]].append(line)
+
+    for slide_number, slide_lines in by_slide.items():
+        track = max(slide_lines, key=lambda item: item["width_pt"])
+        patterns.append({
+            "pattern_id": f"pg_bar_{len(patterns) + 1:03d}",
+            "type": "progress_bar",
+            "confidence": 0.62,
+            "slide_count": 1,
+            "slide_numbers": [slide_number],
+            "instances": [{
+                "slide_number": slide_number,
+                "track_width_pt": round(track["width_pt"], 2),
+                "y_norm": round(track["center_y_pt"] / slide_height, 3),
+            }],
+            "detection": {"methods": ["horizontal_track", "bottom_zone"]},
+        })
+    return patterns
+
+
+def _aggregate_pagination_patterns(
+    dot_rows: list[dict],
+    slide_width: float,
+    slide_height: float,
+) -> list[dict]:
+    grouped = defaultdict(list)
+    for row in dot_rows:
+        signature = (
+            row["dot_count"],
+            round(row["spacing_pt"] / 4),
+            round(row["y_norm"] * 20),
+        )
+        grouped[signature].append(row)
+
+    patterns = []
+    for index, (_, rows) in enumerate(sorted(grouped.items(), key=lambda item: -len(item[1])), start=1):
+        if len(rows) < MIN_PAGINATION_SLIDES:
+            continue
+
+        slide_numbers = sorted({row["slide_number"] for row in rows})
+        active_indices = [row["active_index"] for row in rows if row["active_index"] is not None]
+        progression = _score_active_progression(slide_numbers, rows)
+        active_confidence = median([row["active_confidence"] for row in rows if row["active_confidence"]]) if rows else 0
+
+        confidence = _dot_pattern_confidence(rows, progression, active_confidence, len(active_indices))
+        if confidence < 0.55:
+            continue
+
+        patterns.append({
+            "pattern_id": f"pg_dots_{index:03d}",
+            "type": "dot_pagination",
+            "confidence": round(confidence, 3),
+            "slide_count": len(slide_numbers),
+            "slide_numbers": slide_numbers,
+            "dot_count": rows[0]["dot_count"],
+            "spacing_pt": round(median(row["spacing_pt"] for row in rows), 2),
+            "y_norm": round(median(row["y_norm"] for row in rows), 3),
+            "active_progression_score": round(progression, 3),
+            "active_detection_rate": round(len(active_indices) / len(rows), 3),
+            "logic": _describe_pagination_logic(rows, progression),
+            "instances": [{
+                "slide_number": row["slide_number"],
+                "dot_count": row["dot_count"],
+                "active_index": row["active_index"],
+                "active_reason": row["active_reason"],
+                "spacing_uniformity": row["spacing_uniformity"],
+                "dots": row["dots"],
+            } for row in rows],
+            "detection": {
+                "methods": [
+                    "bottom_zone",
+                    "equal_spacing",
+                    "active_state",
+                    "cross_slide_progression",
+                ],
+            },
+        })
+    return patterns
+
+
+def _dot_pattern_confidence(
+    rows: list[dict],
+    progression: float,
+    active_confidence: float,
+    active_count: int,
+) -> float:
+    slide_factor = min(1.0, len(rows) / 5)
+    spacing_factor = median(row["spacing_uniformity"] for row in rows)
+    active_factor = min(1.0, active_count / max(len(rows), 1))
+    active_quality = active_confidence or 0.45
+
+    score = (
+        0.22
+        + 0.22 * slide_factor
+        + 0.18 * spacing_factor
+        + 0.18 * active_factor
+        + 0.12 * active_quality
+        + 0.18 * progression
+    )
+    return min(0.99, score)
+
+
+def _score_active_progression(slide_numbers: list[int], rows: list[dict]) -> float:
+    pairs = []
+    for row in sorted(rows, key=lambda item: item["slide_number"]):
+        if row["active_index"] is None:
+            continue
+        pairs.append((row["slide_number"], row["active_index"]))
+    if len(pairs) < 2:
+        return 0.35 if pairs else 0.0
+
+    sequential_hits = 0
+    for index in range(len(pairs) - 1):
+        slide_delta = pairs[index + 1][0] - pairs[index][0]
+        active_delta = pairs[index + 1][1] - pairs[index][1]
+        if slide_delta > 0 and active_delta == slide_delta:
+            sequential_hits += 1
+        elif slide_delta > 0 and active_delta > 0:
+            sequential_hits += 0.5
+    return sequential_hits / (len(pairs) - 1)
+
+
+def _score_page_progression(slide_numbers: list[int], instances: list[dict]) -> float:
+    pairs = sorted(
+        ((inst["slide_number"], inst["current_page"]) for inst in instances),
+        key=lambda item: item[0],
+    )
+    if len(pairs) < 2:
+        return 0.3
+    hits = 0
+    for index in range(len(pairs) - 1):
+        slide_delta = pairs[index + 1][0] - pairs[index][0]
+        page_delta = pairs[index + 1][1] - pairs[index][1]
+        if slide_delta > 0 and page_delta == slide_delta:
+            hits += 1
+    return hits / (len(pairs) - 1)
+
+
+def _describe_pagination_logic(rows: list[dict], progression: float) -> dict:
+    dot_count = rows[0]["dot_count"]
+    active_indices = [row["active_index"] for row in rows if row["active_index"] is not None]
+    reasons = Counter(row["active_reason"] for row in rows if row.get("active_reason"))
+    return {
+        "total_indicators": dot_count,
+        "required": ["equal_spacing_row", "bottom_zone_placement"],
+        "active_state": {
+            "detected_on_slides": len(active_indices),
+            "dominant_reason": reasons.most_common(1)[0][0] if reasons else None,
+            "progression": "sequential" if progression >= 0.65 else "partial" if progression >= 0.3 else "static",
+        },
+        "rejects_decorative": [
+            "needs >= 3 dots in row",
+            "needs regular spacing",
+            "needs bottom zone",
+            "needs active state or cross-slide progression",
+        ],
+    }
