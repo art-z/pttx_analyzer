@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f6f7f9" />
+    <title>PPTX Design System Analyzer</title>
+  </head>
+  <body>
+    <div id="app">
+
+      <main class="shell">
+        <div class="eyebrow"><span class="eyebrow-line"></span> АНАЛИЗ ПРЕЗЕНТАЦИИ</div>
+        <div class="hero">
+          <div><h1>Разбор шаблона<br><em>и сценарий слайдов.</em></h1><p>Загрузите корпоративный PPTX — сервис извлечёт дизайн-систему, компоненты и слайды. Генерация сценария через LLM опциональна. <a class="mode-switch" href="/lite.html">Лёгкая версия</a></p></div>
+          <div class="hero-number">01 <span>/ 03</span></div>
+        </div>
+        <section class="upload-card" aria-label="Создание презентации">
+          <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="Выбрать файл PPTX">
+            <div class="upload-icon" aria-hidden="true">↑</div>
+            <div><strong id="upload-title">Перетащите шаблон PPTX сюда</strong><p id="upload-hint">или нажмите, чтобы выбрать файл .pptx</p></div>
+            <span class="file-badge">PPTX</span>
+          </div>
+          <input id="file-input" type="file" accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation" hidden />
+          <label class="generate-option" for="generate-presentation">
+            <input id="generate-presentation" type="checkbox" />
+            <span>Генерировать сценарий презентации (LLM)</span>
+          </label>
+          <div id="brief-field" class="brief-field brief-field--disabled">
+            <label for="brief-input">Бриф презентации</label>
+            <textarea id="brief-input" rows="7" placeholder="Опишите цель, аудиторию, продукт и объём презентации…" disabled></textarea>
+            <p id="brief-note" class="brief-note">Для анализа шаблона достаточно PPTX. Бриф нужен только при включённой генерации сценария.</p>
+          </div>
+          <div id="upload-actions" class="upload-actions"><span id="selected-file">Файл не выбран</span><button id="create-button" type="button" disabled>Анализировать шаблон <span aria-hidden="true">↗</span></button></div>
+          <div id="error" class="error" role="alert" hidden></div>
+        </section>
+        <section id="results" class="results" hidden>
+          <div id="results-view-tabs" class="results-view-tabs" role="tablist" aria-label="Вид результатов" hidden>
+            <button type="button" data-results-view="generation" role="tab">Результат генерации</button>
+            <button type="button" data-results-view="analysis" role="tab">Анализ шаблона</button>
+          </div>
+          <div id="llm-usage" class="llm-usage" hidden aria-label="Расход токенов модели"></div>
+          <div id="presentation-section" class="presentation-section" hidden>
+            <div class="result-heading"><div><span class="section-kicker">СЦЕНАРИЙ ПРЕЗЕНТАЦИИ</span><h2 id="presentation-title"></h2><p id="presentation-meta"></p></div><div class="presentation-export-actions" aria-label="Скачать выбранные слайды"><button class="report-link presentation-export-button" data-export-format="pptx" type="button">Скачать PPTX</button><button class="report-link presentation-export-button" data-export-format="html" type="button">Скачать HTML</button><button class="report-link presentation-export-button" data-export-format="pdf" type="button">Скачать PDF</button></div></div>
+            <div id="presentation-error" class="error" role="alert" hidden></div>
+            <div id="presentation-slides" class="presentation-slides"></div>
+          </div>
+          <div id="analysis-section">
+            <div class="result-heading"><div><span class="section-kicker">РЕЗУЛЬТАТ АНАЛИЗА ШАБЛОНА</span><h2 id="result-title"></h2><p>Сводка по элементам презентации</p></div><a id="download-report" class="report-link" download="report.json">Скачать JSON <span aria-hidden="true">↗</span></a></div>
+            <div id="stats" class="stats"></div>
+            <div class="workspace">
+              <div class="tabs-wrap"><div id="tabs" class="tabs" role="tablist" aria-label="Разделы анализа"></div></div>
+              <div id="panel" class="panel" role="tabpanel"></div>
+            </div>
+          </div>
+        </section>
+        <div id="empty-state" class="empty-state"><span>01</span><div class="empty-rule"></div><p>Загрузите шаблон PPTX, чтобы начать анализ</p></div>
+      </main>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

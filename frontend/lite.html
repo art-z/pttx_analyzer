@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f4f6f8" />
+    <title>Презентация</title>
+  </head>
+  <body class="lite-body">
+    <div id="lite-app">
+      <header class="lite-top">
+        <a class="lite-back" href="/">Полная версия</a>
+      </header>
+
+      <section id="lite-form" class="lite-form" aria-label="Новая презентация">
+        <h1>Собрать презентацию</h1>
+        <p class="lite-lead">Шаблон и бриф. После запуска здесь будет ожидание, затем слайды на выбор.</p>
+        <label class="lite-label" for="lite-brief">Бриф</label>
+        <textarea id="lite-brief" rows="8" placeholder="Цель, аудитория, продукт и объём презентации…"></textarea>
+        <label class="lite-drop" id="lite-drop" tabindex="0">
+          <input id="lite-file" type="file" accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation" />
+          <strong id="lite-file-title">Презентация-шаблон</strong>
+          <span id="lite-file-hint">Выберите или перетащите .pptx</span>
+        </label>
+        <div class="lite-actions">
+          <button id="lite-start" type="button" disabled>Собрать <span aria-hidden="true">↗</span></button>
+        </div>
+        <p id="lite-error" class="lite-error" role="alert" hidden></p>
+      </section>
+
+      <section id="lite-wait" class="lite-wait" hidden>
+        <div id="lite-stage" class="lite-stage" aria-hidden="true"></div>
+        <div id="lite-intake" class="lite-intake" aria-hidden="true"></div>
+        <div class="lite-wait-card">
+          <p id="lite-status" class="lite-status" aria-live="polite">Запускаем</p>
+          <div id="lite-upload" class="lite-upload" hidden>
+            <div class="lite-upload-meta">
+              <span id="lite-upload-label">Принимаем файл</span>
+              <strong id="lite-upload-percent">0%</strong>
+            </div>
+            <div class="lite-upload-track">
+              <div id="lite-upload-bar" class="lite-upload-bar"></div>
+            </div>
+            <p id="lite-upload-bytes" class="lite-upload-bytes"></p>
+          </div>
+          <p id="lite-timer" class="lite-timer">0:00.0</p>
+        </div>
+      </section>
+
+      <section id="lite-result" class="lite-result" hidden>
+        <div class="lite-summary">
+          <div>
+            <p class="lite-kicker">Готово</p>
+            <p id="lite-elapsed" class="lite-timer lite-timer--done">0:00.0</p>
+            <p id="lite-tokens" class="lite-tokens"></p>
+          </div>
+          <div class="lite-summary-actions">
+            <button class="lite-download" data-lite-export-format="pptx" type="button">Скачать PPTX</button>
+            <button class="lite-download" data-lite-export-format="html" type="button">Скачать HTML</button>
+            <button class="lite-download" data-lite-export-format="pdf" type="button">Скачать PDF</button>
+            <button id="lite-again" type="button" class="lite-again">Новый запуск</button>
+          </div>
+        </div>
+        <div id="lite-grid" class="lite-grid"></div>
+        <p id="lite-result-error" class="lite-error" role="alert" hidden></p>
+      </section>
+    </div>
+    <script type="module" src="/src/lite.js"></script>
+  </body>
+</html>
